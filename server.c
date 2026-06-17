@@ -6,7 +6,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include "connection_handler.h"
 
 
 #define PORT 8080
@@ -21,6 +20,7 @@ char* getlocalhostipaddress() {
         perror("Error getting localhost");
     }
 
+    int i;
     addr_list = (struct in_addr **) host->h_addr_list;
     return inet_ntoa(*addr_list[0]);
 }
@@ -32,7 +32,8 @@ int main() {
     struct sockaddr_in address = {
         AF_INET,
         htons(PORT),
-        {inet_addr(local_host_address)}, {0}
+        inet_addr(local_host_address),
+        {0}
     };
 
 
@@ -46,29 +47,28 @@ int main() {
 
     // Bind socket to port
     int result = bind(file_descriptor, (struct sockaddr *) &address, sizeof(address));
-    if (result < 0) {
+    if (result == -1) {
         perror("Error in binding socket to port");
         exit(EXIT_FAILURE);
     }
 
-    int listen_result = listen(file_descriptor, 10);
-    if (listen_result < 0) {
-        perror("Error in listening");
+    // Listen for new connections
+    const int status = listen(file_descriptor,10);
+    if (status < 0) {
+        perror("Error in passive socket listening");
         exit(EXIT_FAILURE);
     }
 
-    // Define passive socket that listens for connections
-    while (1) {
-        const int new_connection = accept(file_descriptor, NULL,NULL);
-        if (new_connection < 0) {
-            perror("Accept connection Failed");
-            exit(EXIT_FAILURE);
-        }
+    // Define handler function
 
-        // Call handler
-        handle_connection(new_connection);
+    // Accept a new connection
+    const int client_connection = accept(file_descriptor, NULL, NULL);
+    if (client_connection < 0) {
+        perror("Error in accepting new connection");
+        exit(EXIT_FAILURE);
     }
-    
+
+    close(file_descriptor);
     return 0;
 }
 
