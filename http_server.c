@@ -42,6 +42,13 @@ int main() {
         perror("Socket failed");
     }
 
+    // Set the SO_REUSEPORT option
+    int flag = 1;
+    if (setsockopt(file_descriptor, SOL_SOCKET, SO_REUSEPORT, &flag, sizeof(flag)) < 0) {
+        perror("Error in trying to setup Reuseport");
+        exit(EXIT_FAILURE);
+    }
+
     printf("file_descriptor: %d\n", file_descriptor);
 
     // Bind socket to port
@@ -68,7 +75,9 @@ int main() {
         // Call handler
         handle_connection(new_connection);
     }
-    
+
+    close(file_descriptor);
+
     return 0;
 }
 
