@@ -5,6 +5,23 @@
 #include <stdlib.h>  /* abort() */
 #include <sys/socket.h>
 #include "errno.h"
+#include <fcntl.h>
+#include <unistd.h>
+
+struct RequestLine {
+    char *request_method;
+    char *request_path;
+    char *http_version;
+};
+
+
+int getRequestLine(char *buf, struct RequestLine *requestLine) {
+    int index;
+    for (index=0;*(buf + index) != '/'; index++) {
+        requestLine->request_method[index] = *(buf + index);
+    }
+    return 0;
+}
 
 void handle_connection(int fd) {
     printf("Established connection to socket: %d\n", fd);
@@ -16,18 +33,32 @@ void handle_connection(int fd) {
        Accept: 
        */
 
-    char buf[5];
-    for(;;) {
-        const ssize_t received = recv(fd, &buf, sizeof(buf), 0);
 
-        if (received < 0) {
-            fprintf(stderr, "Receive error: %s\n", strerror(errno));
-            abort();
-        }
+    printf("Hello world\n");
+    char buf[100];
+    ssize_t count = recv(fd, &buf, sizeof(buf), 0);
 
-        printf("%s\n", buf);
+    int save = open("save.txt", O_RDWR | O_CREAT, 0644);
+    write(save, buf, strlen(buf));
 
+    struct RequestLine requestLine;
+    requestLine.request_method = malloc(10);
+    memset(requestLine.request_method, '\0', 10);
+    requestLine.request_path = malloc(100);
+    memset(requestLine.request_path, '\0', 100);
+    requestLine.http_version = malloc(5);
+    memset(requestLine.http_version, '\0', 5);
+
+    int res = getRequestLine(buf, &requestLine);
+
+    //printf("buffer contents: %s\n\n", buf);
+    if (count < 0) {
+        fprintf(stderr, "Receive error: %s\n", strerror(errno));
+        abort();
+    } else if (count == 0) {
+        puts("Connection lost");
     }
 }
+
 
 
