@@ -8,6 +8,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include "http_errors.h"
+#include <fnmatch.h>
+#include <sys/stat.h>
 
 struct RequestLine {
     char *request_method;
@@ -24,21 +26,6 @@ int strcmp(const char *s1, const char *s2) {
     else return 0; // the strings are not equal
 }
 
-/**
- * * : (colon) - typically used to separate volume labels from paths (e.g., "C:\")
-* * (asterisk) - can be confused with wildcard characters
-* ? (question mark) - can be confused with the query string separator
-* " (double quote) - can be confused with string literals
-* / (forward slash) - typically used to separate directory levels
-* < (less-than sign) - can be confused with HTML tags
-* > (greater-than sign) - can be confused with HTML tags
-* | (vertical bar) - can be confused with pipe characters
-* \ (backslash) - can be confused with path separators on Unix-like systems
-* */
-int validateRequestPathName(char *val) {
-    return 0;
-}
-
 int verifyRequestMethod(const char *method) {
 
     if (strcmp(method, "GET") + strcmp(method, "POST") + strcmp(method, "DELETE") + strcmp(method, "PUT") + 
@@ -48,18 +35,32 @@ int verifyRequestMethod(const char *method) {
     return 1;
 }
 
+/**
+ * 0 for fail, 1 for success
+ */
 int verifyRequestPath(char *path) {
-    char *token;
-    token = strtok(path, "/");
-    while (token != NULL) {
-        token = strtok(NULL, "/");
-        printf("token -> %s\n", token);
-    }
-
-    return 1;
+    const char *pattern = "*./*:*?|\"";
+    return fnmatch(pattern, path, 0);
 }
 
-
+/**
+ * 1 = Success, path is valid
+ * 0 = Fail, File/Directory doesn't exist
+ */
+int isPathValid(char *path) {
+    int res = access(path, F_OK);
+    if (res == 0) {
+        puts("File found successfully");
+        return 1;
+    } else {
+        printf("ERRNO -> %d\n", errno);
+        switch(errno) {
+            case ENOENT:
+                fprintf(stderr, "No such file of directory for request path");
+        }
+        return 0;
+    }
+}
 
 int getRequestLine(char *buf, struct RequestLine *requestLine) {
     int index = 0;
@@ -83,12 +84,18 @@ int getRequestLine(char *buf, struct RequestLine *requestLine) {
         ++index;
     }
 
-    puts("Verifying request path");
+    // Verify path doesn't have any incorrect characters
+    int validRequestPath = verifyRequestPath(requestLine->request_path);
 
-    if (verifyRequestPath(requestLine->request_path) == 0) {
+    if (validRequestPath == 0) {
         return ERR_BAD_REQUEST;
     }
 
+    // Verify path is valid
+    int validPath = isPathValid(requestLine->request_path);
+    if (validPath == 0) {
+        return ERR_BAD_REQUEST;
+    }
 
     ++index;
     int http_version_index = 0;
