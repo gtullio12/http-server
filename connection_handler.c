@@ -87,15 +87,15 @@ int openFile(const char *path) {
     return fd;
 }
 
-int getRequestLine(char *buf, struct RequestLine *requestLine) {
+int getRequestLine(char *buf, struct RequestLine *request_line) {
     int index = 0;
     // Parse the request method
     while (*(buf + index) != ' ') {
-        requestLine->request_method[index] = *(buf + index);
+        request_line->request_method[index] = *(buf + index);
         ++index;
     }
 
-    if (verifyRequestMethod(requestLine->request_method) != 1) {
+    if (verifyRequestMethod(request_line->request_method) != 1) {
         return ERR_BAD_REQUEST;
     }
 
@@ -105,19 +105,19 @@ int getRequestLine(char *buf, struct RequestLine *requestLine) {
     // Parse the file path
     while (*(buf + index) != ' ') {
         // BUG: Handle spaces in file path
-        requestLine->request_path[path_index++] = *(buf + index);
+        request_line->request_path[path_index++] = *(buf + index);
         ++index;
     }
 
     // Verify path doesn't have any incorrect characters
-    int validRequestPath = verifyRequestPath(requestLine->request_path);
+    int validRequestPath = verifyRequestPath(request_line->request_path);
 
     if (validRequestPath == 0) {
         return ERR_BAD_REQUEST;
     }
 
     // Verify path is valid
-    int validPath = isPathValid(requestLine->request_path);
+    int validPath = isPathValid(request_line->request_path);
     if (validPath == 0) {
         return ERR_NOT_FOUND;
     }
@@ -126,12 +126,12 @@ int getRequestLine(char *buf, struct RequestLine *requestLine) {
     int http_version_index = 0;
     // Parse the HTTP version
     while (*(buf + index) != ' ') {
-        requestLine->http_version[http_version_index++] = *(buf + index);
+        request_line->http_version[http_version_index++] = *(buf + index);
         ++index;
     }
 
 
-    if (strcmp(requestLine->http_version, "HTTP/1.1") == 1) {
+    if (strcmp(request_line->http_version, "HTTP/1.1") == 1) {
         return ERR_HTTP_VERSION_NOT_SUPPORTED;
     }
 
@@ -161,18 +161,15 @@ void handle_connection(int fd) {
         puts("Connection lost");
     }
 
-    int save = open("save.txt", O_RDWR | O_CREAT, 0644);
-    write(save, buf, strlen(buf));
+    struct RequestLine request_line;
+    request_line.request_method = malloc(10);
+    memset(request_line.request_method, '\0', 10);
+    request_line.request_path = malloc(100);
+    memset(request_line.request_path, '\0', 100);
+    request_line.http_version = malloc(5);
+    memset(request_line.http_version, '\0', 5);
 
-    struct RequestLine requestLine;
-    requestLine.request_method = malloc(10);
-    memset(requestLine.request_method, '\0', 10);
-    requestLine.request_path = malloc(100);
-    memset(requestLine.request_path, '\0', 100);
-    requestLine.http_version = malloc(5);
-    memset(requestLine.http_version, '\0', 5);
-
-    int res = getRequestLine(buf, &requestLine);
+    int res = getRequestLine(buf, &request_line);
 
     if (res >= 0) {
         switch (res) {
@@ -185,38 +182,47 @@ void handle_connection(int fd) {
         }
     }
 
+    if (strcmp(request_line.request_method, "GET") == 1) {
 
-    // Now lets open the file, serialize it, and return back to the user
-    int file = openFile(requestLine.request_path);
-    if (file < 0) {
-        perror("Error finding file");
-        return;
-    }
-   
-    while (1) {
-
-        char *buffer = malloc(CHUNK_SIZE);
-        off_t bytes_read = read(file, buffer, CHUNK_SIZE);
-
-
-        if (bytes_read == 0) { // End of file reached
-            puts("End of file reached");
+        // Now lets open the file, serialize it, and return back to the user
+        int file = openFile(request_line.request_path);
+        if (file < 0) {
+            perror("Error finding file");
             return;
-        } else if (bytes_read == -1) { // Error reading chunk
-            perror("Error reading bytes");
         }
 
-        char r[100];
-        sprintf(r, "HTTP/1.1 200 OK\n"
-                "Content-Length: %d\r\n"
-                "Connection: close\n"
-                "\n"
-                "%s",CHUNK_SIZE, buffer);
+        // Get file information
+        struct stat sb;
+        fstat(file, &sb);
 
-        int response = send(fd, r, strlen(r), 0);
-        printf("Send response -> %d\n", response);
+        // Send headers first
+        char headers[200];
+        // TODO: determine if connection should be keep-alive or close
+        sprintf(headers, "HTTP/1.1 200 OK\n"
+                    "Content-Length: %ld\r\n"
+                    "Connection: close\r\n"
+                    "\r\n", sb.st_size);
 
-        break;
+        send(fd, headers, strlen(headers), 0);
+
+        char *buffer = malloc(CHUNK_SIZE);
+
+        while (1) {
+            off_t bytes_read = read(file, buffer, CHUNK_SIZE);
+
+            if (bytes_read == 0) { // End of file reached
+                puts("End of file reached");
+                return;
+            } else if (bytes_read == -1) { // Error reading chunk
+                perror("Error reading bytes");
+                break;
+            }
+
+            send(fd, buffer, CHUNK_SIZE, 0);
+        }
+
+        free(buffer);
+        close(fd);
     }
 
 }
