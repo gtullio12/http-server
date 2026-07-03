@@ -1,4 +1,5 @@
 #include "connection_handler.h"
+#include <asm-generic/errno-base.h>
 #include <stdio.h>
 #include <stddef.h>  /* ssize_t */
 #include <string.h>  /* strerror() */
@@ -10,6 +11,8 @@
 #include "http_errors.h"
 #include <fnmatch.h>
 #include <sys/stat.h>
+
+#define CHUNK_SIZE 4096
 
 struct RequestLine {
     char *request_method;
@@ -62,6 +65,28 @@ int isPathValid(char *path) {
     }
 }
 
+/**
+ * Opens file and handle errors when opening
+ */
+int openFile(const char *path) {
+    // Open the file in read only mode
+    int fd = open(path, O_RDONLY | O_NONBLOCK, 0);
+    if (fd < 0) {
+        switch (errno) {
+            case ENOENT:
+                printf("No such file or directory for path: %s\n", path);
+                break;
+            case EACCES:
+                printf("Permission Denied for path: %s\n", path);
+                break;
+            case EIO:
+                printf("Input/output error(your disk is full)");
+        }
+        return -1;
+    }
+    return fd;
+}
+
 int getRequestLine(char *buf, struct RequestLine *requestLine) {
     int index = 0;
     // Parse the request method
@@ -94,7 +119,7 @@ int getRequestLine(char *buf, struct RequestLine *requestLine) {
     // Verify path is valid
     int validPath = isPathValid(requestLine->request_path);
     if (validPath == 0) {
-        return ERR_BAD_REQUEST;
+        return ERR_NOT_FOUND;
     }
 
     ++index;
@@ -109,6 +134,7 @@ int getRequestLine(char *buf, struct RequestLine *requestLine) {
     if (strcmp(requestLine->http_version, "HTTP/1.1") == 1) {
         return ERR_HTTP_VERSION_NOT_SUPPORTED;
     }
+
 
     // FIX THIS. 0 should be success, anything less than 0 is a error
     return -1;
@@ -125,9 +151,15 @@ void handle_connection(int fd) {
        */
 
 
-    printf("Hello world\n");
     char buf[100];
     ssize_t count = recv(fd, &buf, sizeof(buf), 0);
+
+    if (count < 0) {
+        fprintf(stderr, "Receive error: %s\n", strerror(errno));
+        abort();
+    } else if (count == 0) {
+        puts("Connection lost");
+    }
 
     int save = open("save.txt", O_RDWR | O_CREAT, 0644);
     write(save, buf, strlen(buf));
@@ -153,13 +185,40 @@ void handle_connection(int fd) {
         }
     }
 
-    //printf("buffer contents: %s\n\n", buf);
-    if (count < 0) {
-        fprintf(stderr, "Receive error: %s\n", strerror(errno));
-        abort();
-    } else if (count == 0) {
-        puts("Connection lost");
+
+    // Now lets open the file, serialize it, and return back to the user
+    int file = openFile(requestLine.request_path);
+    if (file < 0) {
+        perror("Error finding file");
+        return;
     }
+   
+    while (1) {
+
+        char *buffer = malloc(CHUNK_SIZE);
+        off_t bytes_read = read(file, buffer, CHUNK_SIZE);
+
+
+        if (bytes_read == 0) { // End of file reached
+            puts("End of file reached");
+            return;
+        } else if (bytes_read == -1) { // Error reading chunk
+            perror("Error reading bytes");
+        }
+
+        char r[100];
+        sprintf(r, "HTTP/1.1 200 OK\n"
+                "Content-Length: %d\r\n"
+                "Connection: close\n"
+                "\n"
+                "%s",CHUNK_SIZE, buffer);
+
+        int response = send(fd, r, strlen(r), 0);
+        printf("Send response -> %d\n", response);
+
+        break;
+    }
+
 }
 
 
