@@ -104,7 +104,6 @@ int getRequestLine(char *buf, struct RequestLine *request_line) {
     int path_index = 0;
     // Parse the file path
     while (*(buf + index) != ' ') {
-        // BUG: Handle spaces in file path
         request_line->request_path[path_index++] = *(buf + index);
         ++index;
     }
@@ -136,8 +135,7 @@ int getRequestLine(char *buf, struct RequestLine *request_line) {
     }
 
 
-    // FIX THIS. 0 should be success, anything less than 0 is a error
-    return -1;
+    return 0;
 }
 
 void handle_connection(int fd) {
@@ -171,7 +169,7 @@ void handle_connection(int fd) {
 
     int res = getRequestLine(buf, &request_line);
 
-    if (res >= 0) {
+    if (res < 0) {
         switch (res) {
             case ERR_HTTP_VERSION_NOT_SUPPORTED:
                 fprintf(stderr, "HTTP Version not supported. Only HTTP/1.1");
