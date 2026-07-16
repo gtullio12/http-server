@@ -1,4 +1,5 @@
 #include "connection_handler.h"
+#include "parse_header.h"
 #include <asm-generic/errno-base.h>
 #include <stdio.h>
 #include <stddef.h>  /* ssize_t */
@@ -20,12 +21,20 @@ struct RequestLine {
     char *http_version;
 };
 
+struct PostRequest {
+    int content_length;
+    char *file_name;
+    char *boundary;
+};
+
 int strcmp(const char *s1, const char *s2) {
-    while (*s1 == *s2 && *s1 != '\0' && *s2 != '\0') {
-        s1++;
-        s2++;
+    const char *t1 = s1;
+    const char *t2 = s2;
+    while (*t1== *t2 && *t1 != '\0' && *t2 != '\0') {
+        t1++;
+        t2++;
     }
-    if (*s1 == *s2) return 1; // the strings are equal
+    if (*t1 == *t2) return 1; // the strings are equal
     else return 0; // the strings are not equal
 }
 
@@ -124,7 +133,7 @@ int getRequestLine(char *buf, struct RequestLine *request_line) {
     ++index;
     int http_version_index = 0;
     // Parse the HTTP version
-    while (*(buf + index) != ' ') {
+    while (*(buf + index) != ' ' && *(buf + index) != '\0') {
         request_line->http_version[http_version_index++] = *(buf + index);
         ++index;
     }
@@ -134,9 +143,39 @@ int getRequestLine(char *buf, struct RequestLine *request_line) {
         return ERR_HTTP_VERSION_NOT_SUPPORTED;
     }
 
-
     return 0;
 }
+
+
+/*
+ * Get current line
+ * */
+void extract_current_line(int fd, char *line) {
+    int index = 0;
+    char *temp_buf = malloc(1);
+    memset(temp_buf, '\0', 1);
+
+    // Get first line
+    while (1) {
+        ssize_t count = recv(fd, temp_buf, 1, 0);
+
+        if (count < 0) {
+            fprintf(stderr, "Receive error: %s\n", strerror(errno));
+            abort();
+        } else if (count == 0) {
+            puts("Connection lost");
+        }
+
+        if (temp_buf[0] == '\n') 
+            break;
+
+        line[index++] = temp_buf[0];
+        temp_buf[0] = '\0';
+    }
+
+    free(temp_buf);
+}
+
 
 void handle_connection(int fd) {
     printf("Established connection to socket: %d\n", fd);
@@ -148,26 +187,19 @@ void handle_connection(int fd) {
        Accept: 
        */
 
-
-    char buf[100];
-    ssize_t count = recv(fd, &buf, sizeof(buf), 0);
-
-    if (count < 0) {
-        fprintf(stderr, "Receive error: %s\n", strerror(errno));
-        abort();
-    } else if (count == 0) {
-        puts("Connection lost");
-    }
+    // Get first line from client
+    char raw_request_line[100];
+    extract_current_line(fd, raw_request_line);
 
     struct RequestLine request_line;
     request_line.request_method = malloc(10);
     memset(request_line.request_method, '\0', 10);
-    request_line.request_path = malloc(100);
+    request_line.request_path = malloc(200);
     memset(request_line.request_path, '\0', 100);
-    request_line.http_version = malloc(5);
+    request_line.http_version = malloc(200);
     memset(request_line.http_version, '\0', 5);
 
-    int res = getRequestLine(buf, &request_line);
+    int res = getRequestLine(raw_request_line, &request_line);
 
     if (res < 0) {
         switch (res) {
@@ -181,6 +213,24 @@ void handle_connection(int fd) {
     }
 
     if (strcmp(request_line.request_method, "GET") == 1) {
+
+        // Read all headers first from socket, then parse after 
+        char raw_headers[1000];
+        ssize_t c = recv(fd, raw_headers, sizeof(raw_headers), 0);
+
+        if (c < 0) {
+            fprintf(stderr, "Receive error: %s\n", strerror(errno));
+            abort();
+        } else if (c == 0) {
+            puts("Connection lost");
+        }
+
+        struct Get_Header get_header;
+        get_header.user_agent = malloc(100);
+        get_header.accept = malloc(100);
+        get_header.host = malloc(100);
+
+        parse_get_header(raw_headers, &get_header);
 
         // Now lets open the file, serialize it, and return back to the user
         int file = openFile(request_line.request_path);
@@ -197,9 +247,9 @@ void handle_connection(int fd) {
         char headers[200];
         // TODO: determine if connection should be keep-alive or close
         sprintf(headers, "HTTP/1.1 200 OK\n"
-                    "Content-Length: %ld\r\n"
-                    "Connection: close\r\n"
-                    "\r\n", sb.st_size);
+                "Content-Length: %ld\r\n"
+                "Connection: close\r\n"
+                "\r\n", sb.st_size);
 
         send(fd, headers, strlen(headers), 0);
 
@@ -220,9 +270,16 @@ void handle_connection(int fd) {
         }
 
         free(buffer);
+        free(get_header.user_agent);
+        free(get_header.accept);
+        free(get_header.host);
         close(fd);
+    } else if (strcmp(request_line.request_method, "POST") == 1) {
     }
 
+    free(request_line.request_method);
+    free(request_line.request_path);
+    free(request_line.http_version);
 }
 
 
