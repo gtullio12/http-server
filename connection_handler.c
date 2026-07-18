@@ -1,4 +1,5 @@
 #include "connection_handler.h"
+#include "parse_files.h"
 #include "parse_header.h"
 #include <asm-generic/errno-base.h>
 #include <stdio.h>
@@ -27,24 +28,18 @@ struct PostRequest {
     char *boundary;
 };
 
-int strcmp(const char *s1, const char *s2) {
-    const char *t1 = s1;
-    const char *t2 = s2;
-    while (*t1== *t2 && *t1 != '\0' && *t2 != '\0') {
-        t1++;
-        t2++;
-    }
-    if (*t1 == *t2) return 1; // the strings are equal
-    else return 0; // the strings are not equal
-}
-
+/**
+ * 1 = Valid method
+ * 0 = Invalid method
+ * */
 int verifyRequestMethod(const char *method) {
-
-    if (strcmp(method, "GET") + strcmp(method, "POST") + strcmp(method, "DELETE") + strcmp(method, "PUT") + 
-            strcmp(method, "HEAD") + strcmp(method, "CONNECT") + strcmp(method, "OPTIONS") + strcmp(method, "TRACE") != 1) {
-        return 0;
+    if (strcmp(method, "GET") == 0 || strcmp(method, "POST") == 0 ||
+        strcmp(method, "DELETE") == 0 || strcmp(method, "PUT") == 0 ||
+        strcmp(method, "HEAD") == 0 || strcmp(method, "CONNECT") == 0 ||
+        strcmp(method, "OPTIONS") == 0 || strcmp(method, "TRACE") == 0) {
+        return 1;
     }
-    return 1;
+    return 0;
 }
 
 /**
@@ -104,7 +99,7 @@ int getRequestLine(char *buf, struct RequestLine *request_line) {
         ++index;
     }
 
-    if (verifyRequestMethod(request_line->request_method) != 1) {
+    if (verifyRequestMethod(request_line->request_method) == 0) {
         return ERR_BAD_REQUEST;
     }
 
@@ -139,24 +134,19 @@ int getRequestLine(char *buf, struct RequestLine *request_line) {
     }
 
 
-    if (strcmp(request_line->http_version, "HTTP/1.1") == 1) {
+    if (strcmp(request_line->http_version, "HTTP/1.1") == 0) {
         return ERR_HTTP_VERSION_NOT_SUPPORTED;
     }
 
     return 0;
 }
 
-
-/*
- * Get current line
- * */
-void extract_current_line(int fd, char *line) {
+void get_current_line(int fd, char *line) {
     int index = 0;
-    char *temp_buf = malloc(1);
-    memset(temp_buf, '\0', 1);
 
     // Get first line
     while (1) {
+        char temp_buf[1];
         ssize_t count = recv(fd, temp_buf, 1, 0);
 
         if (count < 0) {
@@ -164,9 +154,10 @@ void extract_current_line(int fd, char *line) {
             abort();
         } else if (count == 0) {
             puts("Connection lost");
+            break;
         }
 
-        if (temp_buf[0] == '\n') 
+        if (temp_buf[0] == '\n' || temp_buf[0] == '\0' || temp_buf[0] == '\r') 
             break;
 
         line[index++] = temp_buf[0];
@@ -174,7 +165,6 @@ void extract_current_line(int fd, char *line) {
     }
 
     line[index] = '\0';
-    free(temp_buf);
 }
 
 
@@ -190,7 +180,7 @@ void handle_connection(int fd) {
 
     // Get first line from client
     char raw_request_line[100];
-    extract_current_line(fd, raw_request_line);
+    get_current_line(fd, raw_request_line);
 
     struct RequestLine request_line;
     request_line.request_method = malloc(10);
@@ -213,7 +203,7 @@ void handle_connection(int fd) {
         }
     }
 
-    if (strcmp(request_line.request_method, "GET") == 1) {
+    if (strcmp(request_line.request_method, "GET") == 0) {
 
         // Read all headers first from socket, then parse after 
         char raw_headers[1000];
@@ -275,33 +265,33 @@ void handle_connection(int fd) {
         free(get_header.accept);
         free(get_header.host);
         close(fd);
-    } else if (strcmp(request_line.request_method, "POST") == 1) {
+    } else if (strcmp(request_line.request_method, "POST") == 0) {
         struct Post_Header post_header;
         post_header.user_agent = malloc(20);
         post_header.accept = malloc(20);
         post_header.host = malloc(20);
 
-        char raw_headers[200];
+        char raw_headers[500];
         int raw_headers_pointer = 0;
+        char *boundary = malloc(100);
 
         // First we need to get the headers, stop at boundary
         while (1) {
             char line[100];
-            extract_current_line(fd, line);
+            get_current_line(fd, line);
             char *boundary_pointer = strstr(line, "boundary");
 
             if (boundary_pointer != NULL) {
 
                 // Move pointer to value
-                while (*(boundary_pointer) != '=') {
+                while (*(boundary_pointer) != '=' && *(boundary_pointer) != '\0') {
                     ++boundary_pointer;
                 }
                 ++boundary_pointer;
 
-                char boundary[100];
                 int boundary_index = 0;
 
-                while (*boundary_pointer != ' ' && *boundary_pointer != '\n' && *boundary_pointer != '\0') {
+                while (*boundary_pointer != ' ' && *boundary_pointer != '\n' && *boundary_pointer != '\r' && *boundary_pointer != '\0') {
                     boundary[boundary_index++] = *boundary_pointer++;
                 }
                 boundary[boundary_index] = '\0';
@@ -310,7 +300,7 @@ void handle_connection(int fd) {
                 int t;
                 for (t=0;t<5;t++) {
                     char current_line[100];
-                    extract_current_line(fd, current_line);
+                    get_current_line(fd, current_line);
 
                     if (strcmp(current_line, boundary) == 0) {
                         break;
@@ -331,6 +321,10 @@ void handle_connection(int fd) {
 
         // Now that we have read all the headers from the socket. we can parse it
         parse_post_header(raw_headers, &post_header);
+
+        parse_files(fd, &post_header, boundary);
+
+        free(boundary);
     }
 
     free(request_line.request_method);
