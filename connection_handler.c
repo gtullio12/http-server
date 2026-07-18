@@ -173,6 +173,7 @@ void extract_current_line(int fd, char *line) {
         temp_buf[0] = '\0';
     }
 
+    line[index] = '\0';
     free(temp_buf);
 }
 
@@ -275,6 +276,61 @@ void handle_connection(int fd) {
         free(get_header.host);
         close(fd);
     } else if (strcmp(request_line.request_method, "POST") == 1) {
+        struct Post_Header post_header;
+        post_header.user_agent = malloc(20);
+        post_header.accept = malloc(20);
+        post_header.host = malloc(20);
+
+        char raw_headers[200];
+        int raw_headers_pointer = 0;
+
+        // First we need to get the headers, stop at boundary
+        while (1) {
+            char line[100];
+            extract_current_line(fd, line);
+            char *boundary_pointer = strstr(line, "boundary");
+
+            if (boundary_pointer != NULL) {
+
+                // Move pointer to value
+                while (*(boundary_pointer) != '=') {
+                    ++boundary_pointer;
+                }
+                ++boundary_pointer;
+
+                char boundary[100];
+                int boundary_index = 0;
+
+                while (*boundary_pointer != ' ' && *boundary_pointer != '\n' && *boundary_pointer != '\0') {
+                    boundary[boundary_index++] = *boundary_pointer++;
+                }
+                boundary[boundary_index] = '\0';
+
+                // Increment socket to boundary
+                int t;
+                for (t=0;t<5;t++) {
+                    char current_line[100];
+                    extract_current_line(fd, current_line);
+
+                    if (strcmp(current_line, boundary) == 0) {
+                        break;
+                    }
+                }
+                break;
+            }
+
+            // Copy content of line into raw_headers
+            char *p = line;
+            while (*p != '\0') {
+                raw_headers[raw_headers_pointer++] = *p;
+                ++p;
+            }
+            raw_headers[raw_headers_pointer++] = '\n';
+        }
+        raw_headers[raw_headers_pointer] = '\0';
+
+        // Now that we have read all the headers from the socket. we can parse it
+        parse_post_header(raw_headers, &post_header);
     }
 
     free(request_line.request_method);

@@ -16,7 +16,7 @@ typedef struct Post_Header_File {
     struct Post_Header_File *next;
 } Post_Header_File;
 
-typedef struct {
+typedef struct Post_Header {
     char* host;
     char *user_agent;
     char *accept;
